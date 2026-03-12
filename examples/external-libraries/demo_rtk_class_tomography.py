@@ -7,7 +7,7 @@ This example shows 3D cone-beam CT (CBCT) reconstruction using the Reconstructio
 
 We generate a Shepp–Logan phantom, simulate its projection using the RTK CUDA projector operator, and add noise to the measurements. The reconstruction is thus performed using a Proximal Gradient Descent (PGD) algorithm with a Total Variation (TV) prior, and the result is compared against the Feldkamp–Davis–Kress (FDK) reconstruction.
 
-We do this through the `TomographyWithRTK operator`, which wraps the RTK <https://docs.openrtk.org/en/latest/>_ library. This class is defined at this end of this example.
+We do this through the :class:`deepinv.physics.TomographyWithRTK` operator, which wraps the RTK <https://docs.openrtk.org/en/latest/>_ library. This class is defined at this end of this example.
 
 This example requires ITK and RTK to be installed in your current environment. They can be installed using: `pip install itk itk-rtk`
 

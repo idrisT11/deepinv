@@ -10,10 +10,6 @@ if "cuda_image_from_cuda_array" not in itk.__dir__():
 
     raise Exception("Cuda-Array-Interface is not available in the environment. Please update your ITK version.")
 
-#    .. warning::
-#        The forward and backprojectors are not strictly matched adjoints when using voxel based backprojections.
-
-
 class TomographyWithRTK(LinearPhysics):
     r"""Computed Tomography operator with ITK-RTK CUDA backend.
 
@@ -33,8 +29,6 @@ class TomographyWithRTK(LinearPhysics):
 
     The adjoint is implemented using RTK's ray-cast backprojection.
     The pseudo-inverse can be approximated using FDK reconstruction.
-
-
 
     .. note::
 
@@ -151,7 +145,7 @@ class TomographyWithRTK(LinearPhysics):
             
     def _validate_info(self, mode: str, info: dict[str, int | float], name: str) -> None:
         """ Validate that all array-like values in ``info`` have the expected length for the given mode.
-        
+
         :param mode: Either ``"fanbeam"`` or ``"conebeam"``.
         :param info: Dictionary describing a grid (size, spacing, origin) in the image space or in the observation space.
         :param name: Name for error throwing.
@@ -263,8 +257,12 @@ class TomographyWithRTK(LinearPhysics):
 
     
     def fbp(self, y: torch.Tensor, parker_angle:float=0, pad:float=0, **kwargs) -> torch.Tensor:
-        """
-        USING FDK [XXX]
+        """ Reconstruct an image from projection data using the FDK algorithm.
+
+        :param torch.Tensor y: input of shape [B,C,...,A,N]
+        :param float parker_angle: Define the angle using for the computation of the parker weights, in degrees
+        :param float pad: The pad ratio of the image used for the correction of truncation artefacts using the Ohnesorge algorithlm
+        :return reconstruction using the FDK algorithm of shape [B,C,...,H,W]
         """
         y_stacked = y.squeeze(0).squeeze(0)
         
@@ -306,3 +304,4 @@ class TomographyWithRTK(LinearPhysics):
             reco = reco.sum(dim=1)
             
         return reco.unsqueeze(0).unsqueeze(0)
+        
