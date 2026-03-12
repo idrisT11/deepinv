@@ -153,7 +153,7 @@ class TomographyWithRTK(LinearPhysics):
         expected_len = 2 if mode == "fanbeam" else 3
         
         for key, element in info.items():
-            # If the element is not array like, ignore
+            # If the element is not array-like, skip
             if not hasattr(element, "__len__"):
                 continue
                 
@@ -173,9 +173,11 @@ class TomographyWithRTK(LinearPhysics):
         
         x_stacked = x.squeeze(0).squeeze(0)
 
+        # Add a dimension to simulate a 2D projection in fanbeam mode
         if self.mode == 'fanbeam':
             x_stacked = torch.stack([x_stacked.clone()] * self._NB_STACK, dim=1).to("cuda:0") # stack 4 slices of x
 
+        # Cast from tensor to ITK cuda image
         imageSource_cuda = itk.cuda_image_from_cuda_array(x_stacked)
         imageSource_cuda.SetOrigin(self.imagesource_information["origin"])
         imageSource_cuda.SetSpacing(self.imagesource_information["spacing"])
@@ -187,8 +189,7 @@ class TomographyWithRTK(LinearPhysics):
         fp_source.SetConstant(0.0)
         fp_source.Update()
     
-    
-        # 1. Forward projection: Ax
+        # Forward projection: Ax
         forward_projector = rtk.CudaForwardProjectionImageFilter[self._CUDA_IMAGE_TYPE].New()
         forward_projector.SetGeometry(self.geometry)
         forward_projector.SetInput(fp_source.GetOutput())
@@ -198,7 +199,7 @@ class TomographyWithRTK(LinearPhysics):
         Ax = forward_projector.GetOutput()
         Ax.DisconnectPipeline()
 
-
+        # Cast back from itk cuda image to tensor
         projections = torch.as_tensor(Ax, device=x.device).clone()
 
         if self.mode == 'fanbeam':
@@ -219,9 +220,11 @@ class TomographyWithRTK(LinearPhysics):
         
         y_stacked = y.squeeze(0).squeeze(0)
 
+        # Add a dimension to simulate a 2D backprojection in fanbeam mode
         if self.mode == 'fanbeam':
             y_stacked = torch.stack([y_stacked.clone()] * self._NB_STACK_PROJ, dim=1) # stack 4 slices of x
 
+        # Cast from tensor to ITK cuda image
         projection_cuda = itk.cuda_image_from_cuda_array(y_stacked)
         projection_cuda.SetOrigin(self.detector_information["origin"])
         projection_cuda.SetSpacing(self.detector_information["spacing"])
@@ -234,7 +237,7 @@ class TomographyWithRTK(LinearPhysics):
         fp_source.SetConstant(0.0)
         fp_source.Update()
             
-        # 3. Backprojection: A^T (Ax - p)
+        # Backprojection: A^T x
         back_projector = rtk.CudaRayCastBackProjectionImageFilter.New()
         back_projector.SetGeometry(self.geometry)
         back_projector.SetInput(0, fp_source.GetOutput())
@@ -244,8 +247,8 @@ class TomographyWithRTK(LinearPhysics):
         Atx = back_projector.GetOutput()
         Atx.DisconnectPipeline()
 
+        # Cast back from itk cuda image to tensor
         backproj = torch.as_tensor(Atx, device=y.device).clone()
-        #reconstruction = reconstruction_whole[:, 0, :] * 2
         
         if self.mode == 'fanbeam':
             backproj = backproj.sum(dim=1)
@@ -256,23 +259,27 @@ class TomographyWithRTK(LinearPhysics):
         return backproj.unsqueeze(0).unsqueeze(0)
 
     
-    def fbp(self, y: torch.Tensor, parker_angle:float=0, pad:float=0, **kwargs) -> torch.Tensor:
+    def fbp(self, y: torch.Tensor, parker_angle:float=0, pad:float=0, hann:float=0, **kwargs) -> torch.Tensor:
         """ Reconstruct an image from projection data using the FDK algorithm.
 
         :param torch.Tensor y: input of shape [B,C,...,A,N]
-        :param float parker_angle: Define the angle using for the computation of the parker weights, in degrees
-        :param float pad: The pad ratio of the image used for the correction of truncation artefacts using the Ohnesorge algorithlm
+        :param parker_angle: Angle (in degrees) used to compute the Parker weights.
+        :param pad: Padding ratio applied to reduce truncation artefacts via the Ohnesorge algorithm.
+        :param float hann: Cut frequency for Hann window in ]0,1] (0.0 disables it)
         :return reconstruction using the FDK algorithm of shape [B,C,...,H,W]
         """
         y_stacked = y.squeeze(0).squeeze(0)
         
+        # Add a dimension to simulate a 2D reconstruction if in fanbeam mode
         if self.mode == 'fanbeam':
             y_stacked = torch.stack([y_stacked.clone()] * self._NB_STACK_PROJ, dim=1) # stack 4 slices of x
 
+        # Cast from tensor to ITK cuda image
         projection_cuda = itk.cuda_image_from_cuda_array(y_stacked)
         projection_cuda.SetOrigin(self.detector_information["origin"])
         projection_cuda.SetSpacing(self.detector_information["spacing"])
         
+        # Initialize the source
         fp_source = rtk.ConstantImageSource[self._CUDA_IMAGE_TYPE].New()
 
         fp_source.SetSize(self.imagesource_information["size"])
@@ -281,27 +288,28 @@ class TomographyWithRTK(LinearPhysics):
         fp_source.SetConstant(0.0)
         fp_source.Update()                
         
-        # FDK reconstruction
+        # Define the parker filter for short scan artefact correction
         parker = rtk.CudaParkerShortScanImageFilter.New(Geometry=self.geometry)
         parker.SetInput( projection_cuda )
         parker.SetAngularGapThreshold(parker_angle)
 
+        # FDK reconstruction
         feldkamp = rtk.CudaFDKConeBeamReconstructionFilter.New()
         feldkamp.SetInput(0, fp_source.GetOutput())
         feldkamp.SetInput(1, parker.GetOutput())
         feldkamp.SetGeometry(self.geometry)
         feldkamp.GetRampFilter().SetTruncationCorrection(pad)
-        feldkamp.GetRampFilter().SetHannCutFrequency(0.0)
+        feldkamp.GetRampFilter().SetHannCutFrequency(hann)
 
         feldkamp.Update()
         
         itk_reco = feldkamp.GetOutput()
         itk_reco.DisconnectPipeline()
 
+        # Cast back from itk cuda image to tensor
         reco = torch.as_tensor(itk_reco, device=y.device).clone()
         
         if self.mode == 'fanbeam':
             reco = reco.sum(dim=1)
             
         return reco.unsqueeze(0).unsqueeze(0)
-        
