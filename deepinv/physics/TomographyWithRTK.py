@@ -149,12 +149,17 @@ class TomographyWithRTK(LinearPhysics):
             print(self.imagesource_information["origin"]) 
             print(self.imagesource_information["spacing"]) 
             
-
     def _validate_info(self, mode: str, info: dict[str, int | float], name: str) -> None:
-
+        """ Validate that all array-like values in ``info`` have the expected length for the given mode.
+        
+        :param mode: Either ``"fanbeam"`` or ``"conebeam"``.
+        :param info: Dictionary describing a grid (size, spacing, origin) in the image space or in the observation space.
+        :param name: Name for error throwing.
+        """
         expected_len = 2 if mode == "fanbeam" else 3
         
         for key, element in info.items():
+            # If the element is not array like, ignore
             if not hasattr(element, "__len__"):
                 continue
                 
@@ -164,18 +169,6 @@ class TomographyWithRTK(LinearPhysics):
                     f"Expected element length {required_len} for mode {mode!r}, "
                     f"got {actual_len} for key {key!r} in {name}"
                 )
-
-    @classmethod
-    def from_yaml(cls, config_file, verbose=False, *args, **kwargs):
-        volume_grid, projection_grid, geometry, stepsize = read_recon_config(config_file)
-
-        return cls(
-            geometry=geometry, 
-            detector_information=projection_grid.to_dict('2d'), 
-            imagesource_information=volume_grid.to_dict('2d'), 
-            verbose=verbose, stepsize=stepsize, *args, **kwargs
-        )  
-
             
     def A(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
         """Forward projection.
